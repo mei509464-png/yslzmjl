@@ -1,0 +1,1427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>部件管理系统（带备注功能）</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#4F46E5',
+                        secondary: '#10B981',
+                        accent: '#F59E0B',
+                        danger: '#EF4444',
+                        neutral: '#F3F4F6',
+                        dark: '#1F2937'
+                    },
+                }
+            }
+        }
+    </script>
+    
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .suit-card { @apply bg-white rounded-xl shadow-md overflow-hidden transition-all duration-300 hover:shadow-lg mb-6; }
+            .suit-header { @apply bg-primary/10 px-6 py-3 border-b border-gray-100 flex flex-wrap justify-between items-center gap-3; }
+            .part-list { @apply flex flex-wrap gap-3 p-4; }
+            /* 确保部件不会被压缩 */
+            .part-item { @apply flex flex-col items-center text-center p-3 border border-gray-200 rounded-lg shadow-sm transition-all hover:shadow-md bg-white w-28 min-w-[112px]; }
+            .part-image-container { @apply w-20 h-20 mb-2 flex items-center justify-center bg-gray-100 rounded-md border border-gray-200 overflow-hidden relative; }
+            .toggle-switch { @apply relative inline-block w-8 h-4; }
+            .toggle-input { @apply opacity-0 w-0 h-0; }
+            .toggle-slider { @apply absolute cursor-pointer top-0 left-0 right-0 bottom-0 bg-gray-300 rounded-full transition-all duration-300; }
+            .toggle-slider:before { @apply absolute content-[''] h-3 w-3 left-0.5 bottom-0.5 bg-white rounded-full transition-all duration-300; }
+            .part-image { @apply w-full h-full object-cover; }
+            .edit-input { @apply px-2 py-1 border border-primary rounded focus:outline-none focus:ring-1 focus:ring-primary text-sm; }
+            .pool-tab { @apply px-3 py-1.5 rounded-md transition-all duration-200 cursor-pointer whitespace-nowrap text-sm; }
+            .pool-tab.active { @apply bg-primary text-white; }
+            .pool-tab:not(.active) { @apply bg-gray-100 text-gray-700 hover:bg-gray-200; }
+            .add-part-btn { @apply text-accent hover:text-accent/80 transition-colors text-xs flex items-center cursor-pointer ml-3; }
+            .suit-note { @apply text-gray-600 text-sm ml-3 max-w-xs truncate; }
+            .add-pool-visible { @apply flex items-center gap-1 bg-accent text-white px-3 py-1.5 rounded-md hover:bg-accent/90 transition-all duration-300 shadow-sm hover:shadow text-sm; }
+            .editable-text { @apply transition-all duration-200 hover:underline hover:text-primary cursor-text; }
+            .data-btn { @apply bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1.5 rounded-md transition-colors flex items-center text-sm; }
+            .part-check:checked + .toggle-slider { @apply bg-secondary; }
+            .part-check:checked + .toggle-slider:before { @apply transform translate-x-4; }
+            .part-dye:checked + .toggle-slider { @apply bg-danger; }
+            .part-dye:checked + .toggle-slider:before { @apply transform translate-x-4; }
+            .screenshot-overlay { @apply fixed inset-0 bg-black/70 z-50 flex items-center justify-center hidden; }
+            .screenshot-message { @apply bg-white p-6 rounded-xl text-center max-w-md; }
+            /* 部件名称字体优化 */
+            .part-name { @apply truncate max-w-[100px] editable-text text-sm font-medium; }
+            /* 截图专用样式 */
+            .screenshot-mode .suit-card { @apply shadow-none border border-gray-200; }
+            .screenshot-mode { @apply overflow-visible !important; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans text-dark">
+    <div id="screenshot-overlay" class="screenshot-overlay">
+        <div class="screenshot-message">
+            <i class="fa fa-circle-o-notch fa-spin text-3xl text-primary mb-3"></i>
+            <p>正在生成图片，请稍候...</p>
+        </div>
+    </div>
+
+    <!-- 预览图片模态框 -->
+    <div id="preview-modal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-4xl transform transition-all duration-300 scale-95 opacity-0" id="preview-modal-content">
+            <h2 class="text-xl font-bold mb-4">图片预览</h2>
+            <div class="overflow-auto max-h-[80vh]">
+                <img id="preview-image" src="" alt="预览" class="max-w-full h-auto border border-gray-200 rounded-lg">
+            </div>
+            <div class="flex justify-end space-x-3 pt-4">
+                <button id="close-preview" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">关闭</button>
+                <button id="download-preview" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">下载图片</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container mx-auto px-4 py-6">
+        <header class="flex flex-wrap justify-between items-center mb-6 gap-3">
+            <h1 id="system-title" class="text-[clamp(1.5rem,3vw,2rem)] font-bold text-dark editable-text" ondblclick="editSystemName(event)">
+                部件管理系统
+            </h1>
+            <div class="flex gap-2">
+                <button id="preview-image-btn" class="data-btn mr-2">
+                    <i class="fa fa-eye mr-1"></i> 预览图片
+                </button>
+                <button id="save-image-btn" class="data-btn">
+                    <i class="fa fa-camera mr-1"></i> 保存图片
+                </button>
+                <button id="export-btn" class="data-btn">
+                    <i class="fa fa-download mr-1"></i> 导出数据
+                </button>
+                <label for="import-file" class="data-btn cursor-pointer">
+                    <i class="fa fa-upload mr-1"></i> 导入数据
+                    <input type="file" id="import-file" class="hidden" accept=".json">
+                </label>
+            </div>
+        </header>
+        
+        <div class="mt-4 mb-6">
+            <div class="flex flex-wrap justify-center items-center gap-2 mb-3">
+                <div id="pool-tabs" class="flex flex-wrap gap-1.5">
+                    <!-- 卡池标签将动态生成 -->
+                </div>
+                <button id="add-pool-btn" class="add-pool-visible">
+                    <i class="fa fa-plus"></i> 新卡池
+                </button>
+            </div>
+        </div>
+        
+        <!-- 移除最大宽度限制，允许内容自然展开 -->
+        <div id="suits-container" class="space-y-5">
+            <!-- 套装内容将动态生成 -->
+        </div>
+        
+        <div class="mt-6 text-center">
+            <button id="add-suit-btn" class="bg-primary hover:bg-primary/90 text-white font-medium py-2.5 px-5 rounded-lg shadow-md transition-all duration-300 flex items-center justify-center mx-auto text-sm">
+                <i class="fa fa-plus-circle mr-2"></i> 添加新套装
+            </button>
+        </div>
+    </div>
+    
+    <!-- 新套装模态框 -->
+    <div id="new-suit-modal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md transform transition-all duration-300 scale-95 opacity-0" id="modal-content">
+            <h2 class="text-xl font-bold mb-4">添加新套装</h2>
+            <div class="space-y-4">
+                <div>
+                    <label for="suit-name" class="block text-sm font-medium text-gray-700 mb-1">套装名称</label>
+                    <input type="text" id="suit-name" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all">
+                </div>
+                <div>
+                    <label for="suit-note" class="block text-sm font-medium text-gray-700 mb-1">套装备注（可选）</label>
+                    <input type="text" id="suit-note" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all" placeholder="输入备注信息">
+                </div>
+                <div>
+                    <label for="initial-remaining" class="block text-sm font-medium text-gray-700 mb-1">初始剩余风向标数量</label>
+                    <input type="number" id="initial-remaining" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all" value="0" min="0">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">部件列表（每行一个）</label>
+                    <textarea id="parts-list" rows="5" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all" placeholder="例如：&#10;发型-示例&#10;上衣-示例&#10;下装-示例"></textarea>
+                </div>
+                <div class="flex justify-end space-x-3 pt-2">
+                    <button id="cancel-modal" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">取消</button>
+                    <button id="confirm-modal" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">添加</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 上传图片模态框 -->
+    <div id="image-modal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md transform transition-all duration-300 scale-95 opacity-0" id="image-modal-content">
+            <h2 class="text-xl font-bold mb-4">上传部件图片</h2>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">选择本地图片</label>
+                    <input type="file" id="image-upload" accept="image/*" class="w-full text-sm text-gray-500
+                        file:mr-4 file:py-2 file:px-4
+                        file:rounded-lg file:border-0
+                        file:text-sm file:font-medium
+                        file:bg-primary file:text-white
+                        hover:file:bg-primary/90">
+                </div>
+                <div id="preview-container" class="hidden">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">预览</label>
+                    <img id="image-preview" src="" alt="预览图片" class="max-w-full h-48 object-contain border border-gray-200 rounded-lg">
+                </div>
+                <div class="flex justify-end space-x-3 pt-2">
+                    <button id="cancel-image" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">取消</button>
+                    <button id="confirm-image" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">确认上传</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 卡池操作模态框 -->
+    <div id="pool-modal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md transform transition-all duration-300 scale-95 opacity-0" id="pool-modal-content">
+            <h2 id="pool-modal-title" class="text-xl font-bold mb-4">添加新卡池</h2>
+            <div class="space-y-4">
+                <div>
+                    <label for="pool-name" class="block text-sm font-medium text-gray-700 mb-1">卡池名称</label>
+                    <input type="text" id="pool-name" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all" placeholder="例如：1.2版本卡池">
+                </div>
+                <div class="hidden" id="delete-pool-warning">
+                    <div class="p-3 bg-danger/10 border border-danger/20 rounded-lg text-danger text-sm">
+                        <i class="fa fa-exclamation-triangle mr-1"></i>
+                        警告：删除卡池将同时删除该卡池中的所有套装和部件！
+                    </div>
+                </div>
+                <div class="flex justify-end space-x-3 pt-2">
+                    <button id="cancel-pool" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">取消</button>
+                    <button id="confirm-pool" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">确认</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新部件模态框 -->
+    <div id="new-part-modal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md transform transition-all duration-300 scale-95 opacity-0" id="new-part-modal-content">
+            <h2 class="text-xl font-bold mb-4">添加新部件</h2>
+            <div class="space-y-4">
+                <div>
+                    <label for="part-name" class="block text-sm font-medium text-gray-700 mb-1">部件名称</label>
+                    <input type="text" id="part-name" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all" placeholder="例如：发型-示例">
+                </div>
+                <div class="flex justify-end space-x-3 pt-2">
+                    <button id="cancel-part" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">取消</button>
+                    <button id="confirm-part" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">添加</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let appData = JSON.parse(localStorage.getItem('partsManagementAppData')) || {
+            systemName: "部件管理系统",
+            cardPools: [
+                {
+                    id: 1,
+                    name: '1.1版本卡池',
+                    suits: [
+                        {
+                            id: 1,
+                            name: '卧月沉莲',
+                            note: '', // 新增备注字段
+                            remaining: 0,
+                            parts: [
+                                { id: 1, name: '发型-明珰暗靥', checked: false, dyed: false, image: null },
+                                { id: 2, name: '外套-舞鬓垂莲', checked: false, dyed: false, image: null },
+                                { id: 3, name: '上衣-卧月灼莲', checked: false, dyed: false, image: null },
+                                { id: 4, name: '下装-绮莲拂团', checked: false, dyed: false, image: null },
+                                { id: 5, name: '鞋子-踏莲', checked: false, dyed: false, image: null },
+                                { id: 6, name: '头饰-莲冠', checked: false, dyed: false, image: null },
+                                { id: 7, name: '耳饰-清涟', checked: false, dyed: false, image: null },
+                                { id: 8, name: '手持-莲灯', checked: false, dyed: false, image: null },
+                                { id: 9, name: '妆容-月痕', checked: false, dyed: false, image: null },
+                                { id: 10, name: '特殊-莲影', checked: false, dyed: false, image: null },
+                            ]
+                        },
+                        {
+                            id: 2,
+                            name: '盛世华廷',
+                            note: '', // 新增备注字段
+                            remaining: 0,
+                            parts: [
+                                { id: 1, name: '发型-金梦堕落', checked: false, dyed: false, image: null },
+                                { id: 2, name: '连衣裙-盛世华廷', checked: false, dyed: false, image: null },
+                            ]
+                        }
+                    ]
+                },
+                {
+                    id: 2,
+                    name: '1.2版本卡池',
+                    suits: [
+                        {
+                            id: 1,
+                            name: '盛筵分解',
+                            note: '', // 新增备注字段
+                            remaining: 0,
+                            parts: [
+                                { id: 1, name: '良辰花色', checked: false, dyed: false, image: null },
+                                { id: 2, name: '蝶乱花茵', checked: false, dyed: false, image: null },
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        let { systemName, cardPools } = appData;
+        let currentPoolId = cardPools.length > 0 ? cardPools[0].id : 1;
+        let currentSuitId = null;
+        let currentPartId = null;
+        let currentEditingPoolId = null;
+
+        // DOM元素获取
+        const systemTitle = document.getElementById('system-title');
+        const suitsContainer = document.getElementById('suits-container');
+        const poolTabs = document.getElementById('pool-tabs');
+        const addSuitBtn = document.getElementById('add-suit-btn');
+        const addPoolBtn = document.getElementById('add-pool-btn');
+        const exportBtn = document.getElementById('export-btn');
+        const importFile = document.getElementById('import-file');
+        const saveImageBtn = document.getElementById('save-image-btn');
+        const screenshotOverlay = document.getElementById('screenshot-overlay');
+        
+        // 预览相关元素
+        const previewImageBtn = document.getElementById('preview-image-btn');
+        const previewModal = document.getElementById('preview-modal');
+        const previewModalContent = document.getElementById('preview-modal-content');
+        const previewImage = document.getElementById('preview-image');
+        const closePreview = document.getElementById('close-preview');
+        const downloadPreview = document.getElementById('download-preview');
+        
+        const newSuitModal = document.getElementById('new-suit-modal');
+        const modalContent = document.getElementById('modal-content');
+        const cancelModal = document.getElementById('cancel-modal');
+        const confirmModal = document.getElementById('confirm-modal');
+        
+        const imageModal = document.getElementById('image-modal');
+        const imageModalContent = document.getElementById('image-modal-content');
+        const cancelImage = document.getElementById('cancel-image');
+        const confirmImage = document.getElementById('confirm-image');
+        const imageUpload = document.getElementById('image-upload');
+        const imagePreview = document.getElementById('image-preview');
+        const previewContainer = document.getElementById('preview-container');
+        
+        const poolModal = document.getElementById('pool-modal');
+        const poolModalContent = document.getElementById('pool-modal-content');
+        const poolModalTitle = document.getElementById('pool-modal-title');
+        const cancelPool = document.getElementById('cancel-pool');
+        const confirmPool = document.getElementById('confirm-pool');
+        const deletePoolWarning = document.getElementById('delete-pool-warning');
+        
+        const newPartModal = document.getElementById('new-part-modal');
+        const newPartModalContent = document.getElementById('new-part-modal-content');
+        const cancelPart = document.getElementById('cancel-part');
+        const confirmPart = document.getElementById('confirm-part');
+        const partNameInput = document.getElementById('part-name');
+
+        systemTitle.textContent = systemName;
+
+        // 图片保存功能
+        async function generatePoolImage() {
+            const currentPool = getCurrentPool();
+            if (!currentPool) {
+                alert('没有可保存的卡池数据');
+                return null;
+            }
+
+            // 保存原始样式以便恢复
+            const originalBodyStyle = document.body.style.cssText;
+            const originalContainerStyle = suitsContainer.style.cssText;
+            
+            try {
+                // 隐藏所有模态框
+                [newSuitModal, imageModal, poolModal, newPartModal].forEach(modal => {
+                    modal.classList.add('hidden');
+                });
+
+                // 截图前临时调整样式防止挤压
+                document.body.classList.add('screenshot-mode');
+                suitsContainer.classList.add('screenshot-mode');
+                suitsContainer.style.width = 'auto';
+                suitsContainer.style.minWidth = '100%';
+                
+                // 强制重绘
+                suitsContainer.offsetHeight;
+
+                // 使用合适的参数配置
+                const canvas = await html2canvas(suitsContainer, {
+                    scale: 1.5, // 适度缩放，平衡清晰度和文件大小
+                    useCORS: true,
+                    allowTaint: true,
+                    backgroundColor: '#ffffff', // 使用白色背景而非透明
+                    logging: false,
+                    scrollX: 0,
+                    scrollY: 0,
+                    windowWidth: suitsContainer.scrollWidth,
+                    windowHeight: suitsContainer.scrollHeight
+                });
+
+                return canvas.toDataURL('image/png');
+            } finally {
+                // 恢复原始样式
+                document.body.classList.remove('screenshot-mode');
+                suitsContainer.classList.remove('screenshot-mode');
+                document.body.style.cssText = originalBodyStyle;
+                suitsContainer.style.cssText = originalContainerStyle;
+                
+                // 恢复模态框显示
+                [newSuitModal, imageModal, poolModal, newPartModal].forEach(modal => {
+                    modal.classList.remove('hidden');
+                });
+            }
+        }
+
+        // 预览按钮逻辑
+        previewImageBtn.addEventListener('click', async () => {
+            screenshotOverlay.classList.remove('hidden');
+            try {
+                const dataURL = await generatePoolImage();
+                if (dataURL) {
+                    previewImage.src = dataURL;
+                    previewModal.classList.remove('hidden');
+                    setTimeout(() => {
+                        previewModalContent.classList.remove('scale-95', 'opacity-0');
+                        previewModalContent.classList.add('scale-100', 'opacity-100');
+                    }, 10);
+                }
+            } finally {
+                screenshotOverlay.classList.add('hidden');
+            }
+        });
+
+        // 关闭预览
+        closePreview.addEventListener('click', () => {
+            previewModalContent.classList.remove('scale-100', 'opacity-100');
+            previewModalContent.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                previewModal.classList.add('hidden');
+                previewImage.src = '';
+            }, 300);
+        });
+
+        // 下载预览图片
+        downloadPreview.addEventListener('click', () => {
+            const link = document.createElement('a');
+            const currentPool = getCurrentPool();
+            link.download = `${currentPool?.name || '卡池'}_预览_${new Date().toISOString().split('T')[0]}.png`;
+            link.href = previewImage.src;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+
+        // 保存图片逻辑
+        saveImageBtn.addEventListener('click', async () => {
+            screenshotOverlay.classList.remove('hidden');
+            try {
+                const dataURL = await generatePoolImage();
+                if (dataURL) {
+                    const link = document.createElement('a');
+                    const currentPool = getCurrentPool();
+                    link.download = `${currentPool?.name || '卡池'}_${new Date().toISOString().split('T')[0]}.png`;
+                    link.href = dataURL;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    alert('图片保存成功！');
+                }
+            } catch (error) {
+                console.error('保存图片失败:', error);
+                alert(`保存图片失败: ${error.message}`);
+            } finally {
+                screenshotOverlay.classList.add('hidden');
+            }
+        });
+
+        // 其他功能函数
+        function getCurrentPool() {
+            return cardPools.find(pool => pool.id === currentPoolId);
+        }
+
+        function renderPoolTabs() {
+            poolTabs.innerHTML = '';
+            
+            cardPools.forEach(pool => {
+                const tab = document.createElement('div');
+                tab.className = `pool-tab ${pool.id === currentPoolId ? 'active' : ''}`;
+                tab.innerHTML = `
+                    <span class="editable-text" ondblclick="editPoolName(${pool.id}, event)">${pool.name}</span>
+                    <div class="inline-block ml-1 opacity-0 hover:opacity-100 transition-opacity">
+                        <button class="text-xs hover:text-primary" onclick="editPool(${pool.id}, event)">
+                            <i class="fa fa-pencil"></i>
+                        </button>
+                    </div>
+                `;
+                tab.addEventListener('click', () => switchPool(pool.id));
+                poolTabs.appendChild(tab);
+            });
+        }
+
+        function switchPool(poolId) {
+            currentPoolId = poolId;
+            renderPoolTabs();
+            renderSuits();
+        }
+
+        function renderSuits() {
+            const currentPool = getCurrentPool();
+            if (!currentPool) return;
+            
+            suitsContainer.innerHTML = '';
+            
+            currentPool.suits.forEach(suit => {
+                const suitElement = document.createElement('div');
+                suitElement.className = 'suit-card';
+                suitElement.dataset.suitId = suit.id;
+                
+                let suitHTML = `
+                    <div class="suit-header">
+                        <div class="flex items-center flex-wrap gap-2">
+                            <h2 class="text-lg font-bold text-primary editable-text" 
+                                ondblclick="editSuitName(${suit.id}, event)">${suit.name}</h2>
+                                
+                            <!-- 新增备注显示 -->
+                            <span class="suit-note editable-text" 
+                                  data-suit-id="${suit.id}"
+                                  ondblclick="editSuitNote(${suit.id}, event)">
+                                ${suit.note ? `(${suit.note})` : '(点击添加备注)'}
+                            </span>
+                            
+                            <button class="ml-2 text-danger hover:text-danger/80 transition-colors delete-suit-btn" 
+                                    data-suit-id="${suit.id}"
+                                    title="删除套装">
+                                <i class="fa fa-trash-o"></i>
+                            </button>
+                            <div class="add-part-btn" data-suit-id="${suit.id}">
+                                <i class="fa fa-plus mr-1"></i> 添加新部件
+                            </div>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="mr-2 text-xs text-gray-600">剩余风向标：</span>
+                            <input type="number" 
+                                   value="${suit.remaining}" 
+                                   min="0"
+                                   class="w-16 px-1.5 py-0.5 border border-gray-300 rounded text-center focus:outline-none focus:ring-1 focus:ring-primary text-sm remaining-input"
+                                   data-suit-id="${suit.id}">
+                        </div>
+                    </div>
+                    <div class="part-list">
+                `;
+                
+                suit.parts.forEach(part => {
+                    const imageHtml = part.image ? 
+                        `<img src="${part.image}" alt="${part.name}" class="part-image">` : 
+                        `<i class="fa fa-picture-o text-gray-400 text-xl"></i>`;
+                    
+                    suitHTML += `
+                        <div class="part-item" data-part-id="${part.id}">
+                            <div class="text-center mb-1">
+                                <span class="text-gray-800 part-name truncate max-w-[100px] editable-text text-sm font-medium" 
+                                      data-suit-id="${suit.id}"
+                                      data-part-id="${part.id}"
+                                      ondblclick="editPartName(this, ${suit.id}, ${part.id})">${part.name}</span>
+                            </div>
+                            
+                            <div class="part-image-container" 
+                                 data-suit-id="${suit.id}" 
+                                 data-part-id="${part.id}" 
+                                 onclick="handleImageClick(this)">
+                                ${imageHtml}
+                            </div>
+                            
+                            <div class="flex justify-center items-center gap-3 mb-1">
+                                <div class="flex flex-col items-center">
+                                    <span class="text-xs text-gray-600 mb-0.5">拥有</span>
+                                    <label class="toggle-switch" title="是否拥有">
+                                        <input type="checkbox" 
+                                               class="toggle-input part-check"
+                                               ${part.checked ? 'checked' : ''}
+                                               data-suit-id="${suit.id}"
+                                               data-part-id="${part.id}">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                
+                                <div class="flex flex-col items-center">
+                                    <span class="text-xs text-gray-600 mb-0.5">拓色</span>
+                                    <label class="toggle-switch" title="是否拓色">
+                                        <input type="checkbox" 
+                                               class="toggle-input part-dye"
+                                               ${part.dyed ? 'checked' : ''}
+                                               data-suit-id="${suit.id}"
+                                               data-part-id="${part.id}">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <div class="flex justify-center items-center">
+                                <button class="text-primary hover:text-primary/80 transition-colors upload-image-btn text-xs"
+                                        data-suit-id="${suit.id}"
+                                        data-part-id="${part.id}"
+                                        title="上传图片">
+                                    <i class="fa fa-upload mr-0.5"></i>上传
+                                </button>
+                                <button class="ml-1 text-danger hover:text-danger/80 transition-colors delete-part-btn text-xs"
+                                        data-suit-id="${suit.id}"
+                                        data-part-id="${part.id}"
+                                        title="删除部件">
+                                    <i class="fa fa-trash-o mr-0.5"></i>删除
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                suitHTML += `</div>`;
+                suitElement.innerHTML = suitHTML;
+                suitsContainer.appendChild(suitElement);
+            });
+            
+            if (currentPool.suits.length === 0) {
+                suitsContainer.innerHTML = `
+                    <div class="text-center py-10 bg-white rounded-xl shadow-sm">
+                        <i class="fa fa-info-circle text-gray-400 text-2xl mb-2"></i>
+                        <p class="text-gray-500">当前卡池没有套装，请点击"添加新套装"按钮创建</p>
+                    </div>
+                `;
+            }
+            
+            bindOtherEvents();
+        }
+        
+        // 新增：编辑套装备注
+        function editSuitNote(suitId, event) {
+            event.stopPropagation();
+            
+            const noteElement = document.querySelector(`.suit-note[data-suit-id="${suitId}"]`);
+            if (!noteElement) return;
+            
+            const currentNote = noteElement.textContent.replace(/[()]/g, ''); // 去除括号
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = currentNote === '点击添加备注' ? '' : currentNote;
+            input.className = 'edit-input text-sm';
+            input.placeholder = '输入备注';
+            
+            noteElement.dataset.originalText = currentNote;
+            noteElement.parentNode.replaceChild(input, noteElement);
+            
+            input.focus();
+            input.select();
+            
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    saveSuitNote(input, suitId, noteElement);
+                } else if (e.key === 'Escape') {
+                    cancelEditNote(input, noteElement);
+                }
+            });
+            
+            input.addEventListener('blur', function() {
+                saveSuitNote(input, suitId, noteElement);
+            });
+        }
+        
+        // 新增：保存套装备注
+        function saveSuitNote(input, suitId, originalElement) {
+            const currentPool = getCurrentPool();
+            if (!currentPool) return;
+            
+            const newNote = input.value.trim();
+            
+            const suitIndex = currentPool.suits.findIndex(suit => suit.id === suitId);
+            if (suitIndex !== -1) {
+                currentPool.suits[suitIndex].note = newNote;
+                saveData();
+            }
+            
+            renderSuits();
+        }
+        
+        // 新增：取消编辑备注
+        function cancelEditNote(input, originalElement) {
+            input.parentNode.replaceChild(originalElement, input);
+        }
+        
+        function handleImageClick(container) {
+            const suitId = parseInt(container.dataset.suitId);
+            const partId = parseInt(container.dataset.partId);
+            const currentPool = getCurrentPool();
+            if (!currentPool) return;
+
+            const suitIndex = currentPool.suits.findIndex(suit => suit.id === suitId);
+            if (suitIndex === -1) return;
+
+            const partIndex = currentPool.suits[suitIndex].parts.findIndex(part => part.id === partId);
+            if (partIndex === -1) return;
+
+            const part = currentPool.suits[suitIndex].parts[partIndex];
+            if (part.image) {
+                if (confirm('确定要删除这张图片吗？')) {
+                    deletePartImage(suitId, partId);
+                }
+            }
+        }
+        
+        function bindOtherEvents() {
+            document.querySelectorAll('.remaining-input').forEach(input => {
+                input.addEventListener('change', function() {
+                    const suitId = parseInt(this.dataset.suitId);
+                    const value = parseInt(this.value) || 0;
+                    updateRemaining(suitId, value);
+                });
+            });
+            
+            document.querySelectorAll('.part-check').forEach(toggle => {
+                toggle.addEventListener('change', function() {
+                    const suitId = parseInt(this.dataset.suitId);
+                    const partId = parseInt(this.dataset.partId);
+                    const checked = this.checked;
+                    updateChecked(suitId, partId, checked);
+                });
+            });
+            
+            document.querySelectorAll('.part-dye').forEach(toggle => {
+                toggle.addEventListener('change', function() {
+                    const suitId = parseInt(this.dataset.suitId);
+                    const partId = parseInt(this.dataset.partId);
+                    const dyed = this.checked;
+                    updateDyed(suitId, partId, dyed);
+                });
+            });
+            
+            document.querySelectorAll('.upload-image-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const suitId = parseInt(this.dataset.suitId);
+                    const partId = parseInt(this.dataset.partId);
+                    openImageModal(suitId, partId);
+                });
+            });
+            
+            document.querySelectorAll('.delete-part-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const suitId = parseInt(this.dataset.suitId);
+                    const partId = parseInt(this.dataset.partId);
+                    deletePart(suitId, partId);
+                });
+            });
+            
+            document.querySelectorAll('.delete-suit-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const suitId = parseInt(this.dataset.suitId);
+                    deleteSuit(suitId);
+                });
+            });
+            
+            document.querySelectorAll('.add-part-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const suitId = parseInt(this.dataset.suitId);
+                    openNewPartModal(suitId);
+                });
+            });
+        }
+
+        function editSystemName(event) {
+            event.stopPropagation();
+            
+            const currentName = systemTitle.textContent;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = currentName;
+            input.className = 'edit-input text-[clamp(1.5rem,3vw,2rem)] font-bold';
+            
+            systemTitle.dataset.originalText = currentName;
+            systemTitle.parentNode.replaceChild(input, systemTitle);
+            
+            input.focus();
+            input.select();
+            
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    saveSystemName(input);
+                } else if (e.key === 'Escape') {
+                    cancelSystemNameEdit(input);
+                }
+            });
+            
+            input.addEventListener('blur', function() {
+                saveSystemName(input);
+            });
+        }
+
+        function saveSystemName(input) {
+            const newName = input.value.trim() || input.parentNode.dataset.originalText || "部件管理系统";
+            systemName = newName;
+            systemTitle.textContent = newName;
+            input.parentNode.replaceChild(systemTitle, input);
+            saveData();
+        }
+
+        function cancelSystemNameEdit(input) {
+            input.parentNode.replaceChild(systemTitle, input);
+        }
+
+        function deletePartImage(suitId, partId) {
+            const currentPool = getCurrentPool();
+            if (!currentPool) return;
+            
+            const suitIndex = currentPool.suits.findIndex(suit => suit.id === suitId);
+            if (suitIndex !== -1) {
+                const partIndex = currentPool.suits[suitIndex].parts.findIndex(part => part.id === partId);
+                if (partIndex !== -1) {
+                    currentPool.suits[suitIndex].parts[partIndex].image = null;
+                    saveData();
+                    renderSuits();
+                }
+            }
+        }
+
+        function updateRemaining(suitId, value) {
+            const currentPool = getCurrentPool();
+            if (!currentPool) return;
+            
+            const suitIndex = currentPool.suits.findIndex(suit => suit.id === suitId);
+            if (suitIndex !== -1) {
+                currentPool.suits[suitIndex].remaining = value;
+                saveData();
+            }
+        }
+
+        function updateChecked(suitId, partId, checked) {
+            const currentPool = getCurrentPool();
+            if (!currentPool) return;
+            
+            const suitIndex = currentPool.suits.findIndex(suit => suit.id === suitId);
+            if (suitIndex !== -1) {
+                const partIndex = currentPool.suits[suitIndex].parts.findIndex(part => part.id === partId);
+                if (partIndex !== -1) {
+                    currentPool.suits[suitIndex].parts[partIndex].checked = checked;
+                    saveData();
+                }
+            }
+        }
+
+        function updateDyed(suitId, partId, dyed) {
+            const currentPool = getCurrentPool();
+            if (!currentPool) return;
+            
+            const suitIndex = currentPool.suits.findIndex(suit => suit.id === suitId);
+            if (suitIndex !== -1) {
+                const partIndex = currentPool.suits[suitIndex].parts.findIndex(part => part.id === partId);
+                if (partIndex !== -1) {
+                    currentPool.suits[suitIndex].parts[partIndex].dyed = dyed;
+                    saveData();
+                }
+            }
+        }
+
+        function editPartName(element, suitId, partId) {
+            const nameElement = element.querySelector('.part-name') || 
+                              document.querySelector(`.part-name[data-suit-id="${suitId}"][data-part-id="${partId}"]`);
+                              
+            if (!nameElement) return;
+            
+            const currentName = nameElement.textContent;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = currentName;
+            input.className = 'edit-input';
+            
+            nameElement.dataset.originalText = currentName;
+            nameElement.parentNode.replaceChild(input, nameElement);
+            
+            input.focus();
+            input.select();
+            
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    savePartName(input, suitId, partId);
+                } else if (e.key === 'Escape') {
+                    cancelEditName(input, nameElement);
+                }
+            });
+            
+            input.addEventListener('blur', function() {
+                savePartName(input, suitId, partId);
+            });
+        }
+
+        function savePartName(input, suitId, partId) {
+            const currentPool = getCurrentPool();
+            if (!currentPool) return;
+            
+            const newName = input.value.trim() || input.parentNode.dataset.originalText;
+            
+            const suitIndex = currentPool.suits.findIndex(suit => suit.id === suitId);
+            if (suitIndex !== -1) {
+                const partIndex = currentPool.suits[suitIndex].parts.findIndex(part => part.id === partId);
+                if (partIndex !== -1) {
+                    currentPool.suits[suitIndex].parts[partIndex].name = newName;
+                    saveData();
+                }
+            }
+            
+            renderSuits();
+        }
+
+        function cancelEditName(input, originalElement) {
+            input.parentNode.replaceChild(originalElement, input);
+        }
+
+        function editSuitName(suitId, event) {
+            event.stopPropagation();
+            
+            const nameElement = document.querySelector(`.suit-card[data-suit-id="${suitId}"] .suit-header h2`);
+            if (!nameElement) return;
+            
+            const currentName = nameElement.textContent;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = currentName;
+            input.className = 'edit-input text-lg font-bold';
+            
+            nameElement.dataset.originalText = currentName;
+            nameElement.parentNode.replaceChild(input, nameElement);
+            
+            input.focus();
+            input.select();
+            
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    saveSuitName(input, suitId, nameElement);
+                } else if (e.key === 'Escape') {
+                    cancelEditName(input, nameElement);
+                }
+            });
+            
+            input.addEventListener('blur', function() {
+                saveSuitName(input, suitId, nameElement);
+            });
+        }
+
+        function saveSuitName(input, suitId, originalElement) {
+            const currentPool = getCurrentPool();
+            if (!currentPool) return;
+            
+            const newName = input.value.trim() || originalElement.dataset.originalText;
+            
+            const suitIndex = currentPool.suits.findIndex(suit => suit.id === suitId);
+            if (suitIndex !== -1) {
+                currentPool.suits[suitIndex].name = newName;
+                saveData();
+            }
+            
+            renderSuits();
+        }
+
+        function editPoolName(poolId, event) {
+            event.stopPropagation();
+            
+            const nameElement = document.querySelector(`.pool-tab:has(button[onclick*="editPool(${poolId})"]) .editable-text`);
+            if (!nameElement) return;
+            
+            const currentName = nameElement.textContent;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = currentName;
+            input.className = 'edit-input';
+            
+            nameElement.dataset.originalText = currentName;
+            nameElement.parentNode.replaceChild(input, nameElement);
+            
+            input.focus();
+            input.select();
+            
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    savePoolName(input, poolId, nameElement);
+                } else if (e.key === 'Escape') {
+                    cancelEditName(input, nameElement);
+                }
+            });
+            
+            input.addEventListener('blur', function() {
+                savePoolName(input, poolId, nameElement);
+            });
+        }
+
+        function savePoolName(input, poolId, originalElement) {
+            const poolIndex = cardPools.findIndex(pool => pool.id === poolId);
+            if (poolIndex !== -1) {
+                const newName = input.value.trim() || originalElement.dataset.originalText;
+                cardPools[poolIndex].name = newName;
+                saveData();
+            }
+            
+            renderPoolTabs();
+        }
+
+        function openImageModal(suitId, partId) {
+            currentSuitId = suitId;
+            currentPartId = partId;
+            
+            imagePreview.src = '';
+            previewContainer.classList.add('hidden');
+            imageUpload.value = '';
+            
+            imageModal.classList.remove('hidden');
+            setTimeout(() => {
+                imageModalContent.classList.remove('scale-95', 'opacity-0');
+                imageModalContent.classList.add('scale-100', 'opacity-100');
+            }, 10);
+        }
+
+        function closeImageModal() {
+            imageModalContent.classList.remove('scale-100', 'opacity-100');
+            imageModalContent.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                imageModal.classList.add('hidden');
+                currentSuitId = null;
+                currentPartId = null;
+            }, 300);
+        }
+
+        imageUpload.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    imagePreview.src = event.target.result;
+                    previewContainer.classList.remove('hidden');
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        function confirmImageUpload() {
+            const currentPool = getCurrentPool();
+            if (!currentPool || !currentSuitId || !currentPartId || !imagePreview.src) {
+                closeImageModal();
+                return;
+            }
+            
+            const suitIndex = currentPool.suits.findIndex(suit => suit.id === currentSuitId);
+            if (suitIndex !== -1) {
+                const partIndex = currentPool.suits[suitIndex].parts.findIndex(part => part.id === currentPartId);
+                if (partIndex !== -1) {
+                    currentPool.suits[suitIndex].parts[partIndex].image = imagePreview.src;
+                    saveData();
+                }
+            }
+            
+            renderSuits();
+            closeImageModal();
+        }
+
+        function deletePart(suitId, partId) {
+            if (confirm('确定要删除这个部件吗？')) {
+                const currentPool = getCurrentPool();
+                if (!currentPool) return;
+                
+                const suitIndex = currentPool.suits.findIndex(suit => suit.id === suitId);
+                if (suitIndex !== -1) {
+                    currentPool.suits[suitIndex].parts = currentPool.suits[suitIndex].parts
+                        .filter(part => part.id !== partId);
+                    
+                    saveData();
+                    renderSuits();
+                }
+            }
+        }
+
+        function deleteSuit(suitId) {
+            if (confirm('确定要删除整个套装吗？这将删除套装中的所有部件。')) {
+                const currentPool = getCurrentPool();
+                if (!currentPool) return;
+                
+                currentPool.suits = currentPool.suits.filter(suit => suit.id !== suitId);
+                saveData();
+                renderSuits();
+            }
+        }
+
+        function openNewPartModal(suitId) {
+            currentSuitId = suitId;
+            partNameInput.value = '';
+            
+            newPartModal.classList.remove('hidden');
+            setTimeout(() => {
+                newPartModalContent.classList.remove('scale-95', 'opacity-0');
+                newPartModalContent.classList.add('scale-100', 'opacity-100');
+            }, 10);
+            partNameInput.focus();
+        }
+
+        function closeNewPartModal() {
+            newPartModalContent.classList.remove('scale-100', 'opacity-100');
+            newPartModalContent.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                newPartModal.classList.add('hidden');
+                currentSuitId = null;
+            }, 300);
+        }
+
+        function confirmAddPart() {
+            const partName = partNameInput.value.trim();
+            if (!partName) {
+                alert('请输入部件名称');
+                return;
+            }
+            
+            const currentPool = getCurrentPool();
+            if (!currentPool || !currentSuitId) {
+                closeNewPartModal();
+                return;
+            }
+            
+            const suitIndex = currentPool.suits.findIndex(suit => suit.id === currentSuitId);
+            if (suitIndex !== -1) {
+                const newPartId = currentPool.suits[suitIndex].parts.length > 0
+                    ? Math.max(...currentPool.suits[suitIndex].parts.map(part => part.id)) + 1
+                    : 1;
+                
+                currentPool.suits[suitIndex].parts.push({
+                    id: newPartId,
+                    name: partName,
+                    checked: false,
+                    dyed: false,
+                    image: null
+                });
+                
+                saveData();
+                renderSuits();
+                closeNewPartModal();
+            }
+        }
+
+        function openPoolModal(poolId = null) {
+            currentEditingPoolId = poolId;
+            
+            if (poolId) {
+                const pool = cardPools.find(p => p.id === poolId);
+                if (pool) {
+                    poolModalTitle.textContent = '编辑卡池';
+                    document.getElementById('pool-name').value = pool.name;
+                    deletePoolWarning.classList.remove('hidden');
+                }
+            } else {
+                poolModalTitle.textContent = '添加新卡池';
+                document.getElementById('pool-name').value = '';
+                deletePoolWarning.classList.add('hidden');
+            }
+            
+            poolModal.classList.remove('hidden');
+            setTimeout(() => {
+                poolModalContent.classList.remove('scale-95', 'opacity-0');
+                poolModalContent.classList.add('scale-100', 'opacity-100');
+            }, 10);
+            document.getElementById('pool-name').focus();
+        }
+
+        function closePoolModal() {
+            poolModalContent.classList.remove('scale-100', 'opacity-100');
+            poolModalContent.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                poolModal.classList.add('hidden');
+                currentEditingPoolId = null;
+            }, 300);
+        }
+
+        function confirmPoolAction() {
+            const poolName = document.getElementById('pool-name').value.trim();
+            if (!poolName) {
+                alert('请输入卡池名称');
+                return;
+            }
+            
+            if (currentEditingPoolId) {
+                const poolIndex = cardPools.findIndex(p => p.id === currentEditingPoolId);
+                if (poolIndex !== -1) {
+                    cardPools[poolIndex].name = poolName;
+                    saveData();
+                    renderPoolTabs();
+                }
+            } else {
+                const newId = cardPools.length > 0 
+                    ? Math.max(...cardPools.map(pool => pool.id)) + 1 
+                    : 1;
+                
+                cardPools.push({
+                    id: newId,
+                    name: poolName,
+                    suits: []
+                });
+                
+                currentPoolId = newId;
+                saveData();
+                renderPoolTabs();
+                renderSuits();
+            }
+            
+            closePoolModal();
+        }
+
+        function editPool(poolId, event) {
+            if (event) {
+                event.stopPropagation();
+                event.preventDefault();
+            }
+            openPoolModal(poolId);
+        }
+
+        function deletePool() {
+            if (!currentEditingPoolId) return;
+            
+            if (cardPools.length <= 1) {
+                alert('至少需要保留一个卡池');
+                return;
+            }
+            
+            if (confirm('确定要删除这个卡池吗？这将删除该卡池中的所有套装和部件！')) {
+                const poolIndex = cardPools.findIndex(p => p.id === currentEditingPoolId);
+                if (poolIndex !== -1) {
+                    if (currentEditingPoolId === currentPoolId) {
+                        currentPoolId = cardPools[poolIndex === 0 ? 1 : 0].id;
+                    }
+                    
+                    cardPools.splice(poolIndex, 1);
+                    saveData();
+                    renderPoolTabs();
+                    renderSuits();
+                    closePoolModal();
+                }
+            }
+        }
+
+        function openModal() {
+            newSuitModal.classList.remove('hidden');
+            setTimeout(() => {
+                modalContent.classList.remove('scale-95', 'opacity-0');
+                modalContent.classList.add('scale-100', 'opacity-100');
+            }, 10);
+            document.getElementById('suit-name').focus();
+        }
+
+        function closeModal() {
+            modalContent.classList.remove('scale-100', 'opacity-100');
+            modalContent.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                newSuitModal.classList.add('hidden');
+                document.getElementById('suit-name').value = '';
+                document.getElementById('suit-note').value = ''; // 重置备注输入框
+                document.getElementById('initial-remaining').value = '0';
+                document.getElementById('parts-list').value = '';
+            }, 300);
+        }
+
+        function addNewSuit() {
+            const currentPool = getCurrentPool();
+            if (!currentPool) return;
+            
+            const suitName = document.getElementById('suit-name').value.trim();
+            const suitNote = document.getElementById('suit-note').value.trim(); // 获取备注
+            const initialRemaining = parseInt(document.getElementById('initial-remaining').value) || 0;
+            const partsText = document.getElementById('parts-list').value.trim();
+            
+            if (!suitName) {
+                alert('请输入套装名称');
+                return;
+            }
+            
+            if (!partsText) {
+                alert('请至少输入一个部件');
+                return;
+            }
+            
+            const newId = currentPool.suits.length > 0 
+                ? Math.max(...currentPool.suits.map(suit => suit.id)) + 1 
+                : 1;
+            
+            const parts = partsText.split('\n')
+                .map(line => line.trim())
+                .filter(line => line)
+                .map((name, index) => ({
+                    id: index + 1,
+                    name: name,
+                    checked: false,
+                    dyed: false,
+                    image: null
+                }));
+            
+            currentPool.suits.push({
+                id: newId,
+                name: suitName,
+                note: suitNote, // 保存备注
+                remaining: initialRemaining,
+                parts: parts
+            });
+            
+            saveData();
+            renderSuits();
+            closeModal();
+        }
+
+        exportBtn.addEventListener('click', () => {
+            const dataStr = JSON.stringify(appData);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '部件管理系统数据.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        importFile.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const data = JSON.parse(event.target.result);
+                    if (data.systemName && data.cardPools) {
+                        // 为旧数据添加备注字段（如果不存在）
+                        data.cardPools.forEach(pool => {
+                            pool.suits.forEach(suit => {
+                                if (!suit.hasOwnProperty('note')) {
+                                    suit.note = '';
+                                }
+                            });
+                        });
+                        
+                        appData = data;
+                        systemName = data.systemName;
+                        cardPools = data.cardPools;
+                        currentPoolId = cardPools.length > 0 ? cardPools[0].id : 1;
+                        
+                        systemTitle.textContent = systemName;
+                        
+                        saveData();
+                        renderPoolTabs();
+                        renderSuits();
+                        alert('数据导入成功！');
+                    } else {
+                        alert('导入失败：数据格式不正确');
+                    }
+                } catch (error) {
+                    alert('导入失败：文件格式错误（需为有效的JSON文件）');
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        function saveData() {
+            appData = {
+                systemName,
+                cardPools
+            };
+            localStorage.setItem('partsManagementAppData', JSON.stringify(appData));
+        }
+
+        function loadData() {
+            const savedData = localStorage.getItem('partsManagementAppData');
+            if (savedData) {
+                appData = JSON.parse(savedData);
+                systemName = appData.systemName || "部件管理系统";
+                cardPools = appData.cardPools || [];
+                
+                // 为旧数据添加备注字段（如果不存在）
+                cardPools.forEach(pool => {
+                    pool.suits.forEach(suit => {
+                        if (!suit.hasOwnProperty('note')) {
+                            suit.note = '';
+                        }
+                    });
+                });
+                
+                if (cardPools.length > 0 && !cardPools.some(pool => pool.id === currentPoolId)) {
+                    currentPoolId = cardPools[0].id;
+                }
+            }
+        }
+
+        addSuitBtn.addEventListener('click', openModal);
+        cancelModal.addEventListener('click', closeModal);
+        confirmModal.addEventListener('click', addNewSuit);
+        
+        cancelImage.addEventListener('click', closeImageModal);
+        confirmImage.addEventListener('click', confirmImageUpload);
+        
+        addPoolBtn.addEventListener('click', () => {
+            openPoolModal();
+        });
+        
+        cancelPool.addEventListener('click', closePoolModal);
+        confirmPool.addEventListener('click', function() {
+            if (currentEditingPoolId && confirm('是否要删除这个卡池？取消则保存修改。')) {
+                deletePool();
+            } else {
+                confirmPoolAction();
+            }
+        });
+        
+        cancelPart.addEventListener('click', closeNewPartModal);
+        confirmPart.addEventListener('click', confirmAddPart);
+        partNameInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                confirmAddPart();
+            } else if (e.key === 'Escape') {
+                closeNewPartModal();
+            }
+        });
+        
+        newSuitModal.addEventListener('click', (e) => {
+            if (e.target === newSuitModal) closeModal();
+        });
+        
+        imageModal.addEventListener('click', (e) => {
+            if (e.target === imageModal) closeImageModal();
+        });
+        
+        poolModal.addEventListener('click', (e) => {
+            if (e.target === poolModal) closePoolModal();
+        });
+        
+        newPartModal.addEventListener('click', (e) => {
+            if (e.target === newPartModal) closeNewPartModal();
+        });
+        
+        loadData();
+        renderPoolTabs();
+        renderSuits();
+
+        // 暴露新添加的函数到window对象
+        // 暴露新添加的函数到window对象
+        window.editPool = editPool;
+        window.editPartName = editPartName;
+        window.editSuitName = editSuitName;
+        window.editPoolName = editPoolName;
+        window.editSystemName = editSystemName;
+        window.editSuitNote = editSuitNote;
+    </script>
+</body>
+</html>
